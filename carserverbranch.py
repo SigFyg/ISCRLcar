@@ -1,7 +1,8 @@
 import socket
-from nn import neural_net, LossHistory
-from learningForCar import train_net
+from nn import neural_net
+from learningbranch import train_net
 import numpy as np
+from playingbranch import play
 host = ''
 port = 5560
 
@@ -80,8 +81,20 @@ def dataTransfer(conn):
             else:
                 reply = train_net(model, params, old_state, state, t, epsilon, replay, 
                           loss_log, car_distance, data_collect, max_car_distance)
-            if reply == 'KILL'
+            if reply == 'KILL':
+                t = 0
+                car_distance = 0
                 command == 'KILL'
+        elif command == 'play':
+            values = dataMessage[1].split() #dataMessage[1] is a string
+            state = [0,0,0]#pad the state with zeros
+            for idx,num in enumerate(values):
+                state[idx]=float(num)#fill the state array with each of the values
+            print(format(state))
+            
+            t+=1
+            reply = str((np.argmax(model.predict(state, batch_size=1))))
+                
         elif command == 'EXIT':
             print("Our client has left us")
             break
