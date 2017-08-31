@@ -1,7 +1,9 @@
 import numpy as np
+import pandas as pd
 import random
 import csv
 from nn import neural_net, LossHistory
+from SARSA_brain import RL, SarsaTable
 import os.path
 import timeit
 
@@ -9,10 +11,11 @@ import timeit
 NUM_INPUT = 3
 GAMMA = 0.9  # Forgetting.
 TUNING = False  # If False, just use arbitrary, pre-selected params.
+ALPHA = .5 #Learn Rate
 
 
 def train_net(model, params, old_state, state, t, epsilon, replay, loss_log,
-              car_distance, data_collect, max_car_distance, fps):
+              car_distance, data_collect, max_car_distance, fps, RL, replaySARSA):
     filename = params_to_filename(params)
     observe = 300
     train_frames = 3000
@@ -36,7 +39,7 @@ def train_net(model, params, old_state, state, t, epsilon, replay, loss_log,
 
         # (Don't) Take action, observe new state and get our treat.
         reward = 0
-        if state[0] < 13.0 or state[1] < 13.0 or state[2] < 13.0:# check if crashed
+        if state[0] < 14.0 or state[1] < 14.0 or state[2] < 14.0:# check if crashed
             reward = -500
         else:
             # Higher readings are better, so return the sum.
@@ -44,21 +47,26 @@ def train_net(model, params, old_state, state, t, epsilon, replay, loss_log,
 
         if action=='2': #if the car moves forward
             car_distance+=10
-
+      
         # Experience replay storage.
-        replay.append((old_state, int(action), reward, state))
+        replay.append((old_state, int(action), reward, state))  
+        if t>0:
+            actionPrev = replay[-1][1]
+            older_state = replay[-1][0]   
+            replaySARSA.append((list(older_state), int(actionPrev), reward, list(old_state), int(action)))
         # If we're done observing, start training.
         if t > observe:
             # If we've stored enough in our buffer, pop the oldest.
             #Keeps the replay size at 50000
-            if len(replay) > buffer:
+            if len(replaySARSA) > buffer:
                 replay.pop(0)
 
             # Randomly sample our experience replay memory
-            minibatch = random.sample(replay, batchSize)
-            # Get training values.
-            X_train, y_train = process_minibatch(minibatch, model)
-
+            minibatch = random.sample(replaySARSA, batchSize)
+            # Get training values. This part is different for SARSA
+            X_train, y_train = process_minibatch(minibatch, model, RL)
+            # RL learn from this transition (s, a, r, s, a) ==> Sarsa
+            #RL.learn(str(older_state), actionPrev, reward, str(old_state), int(action))
             # Train the model on this batch.
             history = LossHistory()
             model.fit(
@@ -97,7 +105,7 @@ def train_net(model, params, old_state, state, t, epsilon, replay, loss_log,
 
         # Save the model every 2,000 frames.rm
         if t % 50 == 0:
-            model.save_weights('saved-models/' + filename + '-' +
+            model.save_weights('SARSA-models/' + filename + '-' +
                                str(t) + '.h5',
                                overwrite=True)
             print("Saving model %s - %d" % (filename, t))
@@ -106,20 +114,20 @@ def train_net(model, params, old_state, state, t, epsilon, replay, loss_log,
     else:
         action = 'KILL'
     log_results(filename, data_collect, loss_log, replay)
-    return action, model, old_state, state, epsilon, replay, loss_log, car_distance, data_collect, max_car_distance, fps
+    return action, model, old_state, state, epsilon, replay, loss_log, car_distance, data_collect, max_car_distance, fps, RL, replaySARSA
 
 def log_results(filename, data_collect, loss_log, replay):
     # Save the results to a file so we can graph it later.
-    with open('results2/learn_data-' + filename + '.csv', 'w') as data_dump:#if it's not write, it will repeat itself
+    with open('resultsSARSA/learn_data-' + filename + '.csv', 'w') as data_dump:#if it's not write, it will repeat itself
         wr = csv.writer(data_dump)
         wr.writerows(data_collect)
 
-    with open('results2/loss_data-' + filename + '.csv', 'w') as lf:
+    with open('resultsSARSA/loss_data-' + filename + '.csv', 'w') as lf:
         wr = csv.writer(lf)
         for loss_item in loss_log:
             wr.writerow(loss_item)
 
-    with open('results2/replay-' + filename + '.csv', 'w') as replay_save:
+    with open('resultsSARSA/replay-' + filename + '.csv', 'w') as replay_save:
         wr = csv.writer(replay_save)
         for element in replay:
             wr.writerow(element[0])
@@ -129,7 +137,7 @@ def log_results(filename, data_collect, loss_log, replay):
 
 
 
-def process_minibatch(minibatch, model):
+def process_minibatch(minibatch, model, RL):
     """This does the heavy lifting, aka, the training. It's super jacked."""
     X_train = []
     y_train = []
@@ -137,25 +145,21 @@ def process_minibatch(minibatch, model):
     # so that we can fit our model at every step.
     for memory in minibatch:
         # Get stored values.
-        old_state_m, action_m, reward_m, new_state_m = memory
+        old_state_m, action_m, reward_m, new_state_m, new_action_m = memory
+        RL.q_table.reset_index()
+        RL.learn(str(old_state_m), int(action_m), reward_m, str(new_state_m), int(new_action_m))      
         # Get prediction on old state.
         #np.reshape(old_state_m,(1,3))
-        old_qval = model.predict(np.array([old_state_m]), batch_size=1)
+        old_qval = RL.q_table.ix[str(old_state_m)]
         # Get prediction on new state.
         #np.reshape(new_state_m,(1,3))
-        newQ = model.predict(np.array([new_state_m]), batch_size=1)
+        newQ = RL.q_table.ix[str(new_state_m)]
         # Get our best move. I think?
         maxQ = np.max(newQ)
         y = np.zeros((1, 3))
         y[:] = old_qval[:]
-        # Check for terminal state.
-        if reward_m != -500:  # non-terminal state
-            update = (reward_m + (GAMMA * maxQ))
-        else:  # terminal state
-            update = reward_m
         # Update the value for the action we took.
-        
-        y[0][int(action_m)] = update
+
         X_train.append(np.array([old_state_m]).reshape(NUM_INPUT,))
         y_train.append(y.reshape(3,))
 
@@ -174,10 +178,10 @@ def launch_learn(params):
     filename = params_to_filename(params)
     print("Trying %s" % filename)
     # Make sure we haven't run this one.
-    if not os.path.isfile('results2/loss_data-' + filename + '.csv'):
+    if not os.path.isfile('resultsSARSA/loss_data-' + filename + '.csv'):
         # Create file so we don't double test when we run multiple
         # instances of the script at the same time.
-        open('results2/loss_data-' + filename + '.csv', 'a').close()
+        open('resultsSARSA/loss_data-' + filename + '.csv', 'a').close()
         print("Starting test.")
         # Train.
         model = neural_net(NUM_INPUT, params['nn'])

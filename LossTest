@@ -1,0 +1,2 @@
+from nn import neural_net, LossHistory
+history = LossHistory()

@@ -1,7 +1,8 @@
 import socket
 import csv
 from nn import neural_net, load_This, LossHistory
-from learningbranch import train_net 
+from learningSARSA import train_net 
+from SARSA_brain import SarsaTable
 import numpy as np
 import timeit
 host = ''
@@ -45,11 +46,12 @@ def dataTransfer(conn):
     activations = ['relu','relu','linear']
     model = neural_net(3, nn_param, activations)
     #Uncomment to load latest saved model
-    #model = load_This(model) 
+    model = load_This(model) 
     t = 0
     replay = []
+    replaySARSA = []
     '''
-    with open('results2/replay-165-150-100-5000' + '.csv', newline = '') as replay_save:
+    with open('resultsSARSA/replay-165-150-100-5000' + '.csv', newline = '') as replay_save:
         rd = csv.reader(replay_save) 
         counter = 1
         oldG = []
@@ -71,6 +73,14 @@ def dataTransfer(conn):
                 oldG = []
                 GenState = []
             counter+=1
+    for idx, set in enumerate(replay): #assuming your replay is not less than 2 elements, which is practical
+        if idx>1:
+            writeOldState = replay[idx][0]
+            writeAction = replay[idx][1]
+            writeRew = replay[idx][2]
+            actionPrev = replay[idx-1][1]
+            older_state = replay[idx-1][0]   
+            replaySARSA.append((list(older_state), int(actionPrev), writeRew, list(writeOldState), int(action)))
     '''
     epsilon = 1
     fps = 0
@@ -80,7 +90,7 @@ def dataTransfer(conn):
 
     data_collect = []
     '''
-    with open('results2/learn_data-165-150-100-5000' + '.csv', newline = '') as dataC_save:
+    with open('resultsSARSA/learn_data-165-150-100-5000' + '.csv', newline = '') as dataC_save:
         rdd = csv.reader(dataC_save)
         for row in rdd:
             data_collect.append([int(row[0]), int(row[1])])
@@ -88,14 +98,14 @@ def dataTransfer(conn):
     loss_log = []
     '''
     #double check the loss file
-    with open('results2/loss_data-165-150-100-5000' + '.csv', newline = '') as Loss_save:
+    with open('resultsSARSA/loss_data-165-150-100-5000' + '.csv', newline = '') as Loss_save:
         rddF = csv.reader(Loss_save)
         for row in rddF:
             loss_log.append([float(row[0])])
     print(loss_log)
     '''
     old_state = [0,0,0]
-
+    RL = SarsaTable(actions=list((0,1,2)))
     start_time = timeit.default_timer()
     while True:
         # Receive the data
@@ -115,6 +125,8 @@ def dataTransfer(conn):
             state = [0,0,0]#pad the state with zeros
             for idx,num in enumerate(values):
                 state[idx]=float(num)#fill the state array with each of the values
+            for idx, anM in enumerate(state):
+                state[idx] = int(anM) - int(anM%10)
             print(format(state))
             #begin training
             if t == 0:#needs separate case for first test because the machine can't see into the future
@@ -124,8 +136,8 @@ def dataTransfer(conn):
             else:
                 t+=1  
                 (reply, model, old_state, state, epsilon, replay, 
-                loss_log, car_distance, data_collect, max_car_distance, fps) = train_net(model, params, old_state, state, t, epsilon, replay, 
-                                                                                         loss_log, car_distance, data_collect, max_car_distance, fps)#do the thing
+                loss_log, car_distance, data_collect, max_car_distance, fps, RL, replaySARSA) = train_net(model, params, old_state, state, t, epsilon, replay, 
+                                                                                         loss_log, car_distance, data_collect, max_car_distance, fps, RL, replaySARSA)#do the thing
                 print('Epsilon: '+str(epsilon))
                 print('car_distance:' + str(car_distance))
                 print('Max Distance:' + str(max_car_distance))

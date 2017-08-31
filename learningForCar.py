@@ -24,7 +24,7 @@ def train_net(model, params): #params{batchSize, buffer, nn}
     # Just stuff used below.
     max_car_distance = 0
     car_distance = 0
-    t = 0
+    t = 95
     data_collect = []
     replay = []  # stores tuples of (S, A, R, S').
 
